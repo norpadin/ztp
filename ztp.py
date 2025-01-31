@@ -2,6 +2,7 @@ import socket
 import struct
 import time
 import threading
+import os
 from tftpy import TftpServer
 import json
 
@@ -48,13 +49,17 @@ class DHCPServer:
     def handle_dhcp(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
+            print(f"Received DHCP request from {addr}")
             if data[0] == 1:  # DHCP Discover
                 client_mac = ':'.join(f'{b:02x}' for b in data[28:34])
+                print(f"Client MAC: {client_mac}")
                 offered_ip = self.get_next_ip()
                 if not offered_ip:
+                    print("No available IP addresses to offer.")
                     continue
                 self.leases[client_mac] = offered_ip
                 self.save_leases()
+                print(f"Offering IP {offered_ip} to {client_mac}")
                 self.send_offer(addr, offered_ip, client_mac)
 
     def send_offer(self, addr, ip, mac):
@@ -63,12 +68,16 @@ class DHCPServer:
         offer_packet += socket.inet_aton(ip)  # Your Offered IP
         offer_packet += socket.inet_aton(self.gateway)  # Gateway
         offer_packet += socket.inet_aton(self.dns_server)  # DNS Server
-        # Bootfile Option
-        offer_packet += struct.pack('!B',
-                                    67) + self.bootfile.encode() + b'\x00'
-        # TFTP Server Option
-        offer_packet += struct.pack('!B',
-                                    150) + self.tftp_server.encode() + b'\x00'
+
+        options = b''
+        options += struct.pack('!BB', 67, len(self.bootfile)
+                               ) + self.bootfile.encode()  # Bootfile Option
+        options += struct.pack('!BB', 150, len(self.tftp_server)
+                               ) + self.tftp_server.encode()  # TFTP Server Option
+
+        offer_packet += options
+        print(f"Sending DHCP offer with IP {ip}, Bootfile {
+              self.bootfile}, TFTP Server {self.tftp_server}")
         self.sock.sendto(offer_packet, addr)
 
     def start(self):
@@ -79,6 +88,8 @@ class DHCPServer:
 class TFTPServerWrapper:
     def __init__(self, tftp_directory="tftpboot"):
         self.tftp_directory = tftp_directory
+        if not os.path.exists(self.tftp_directory):
+            os.makedirs(self.tftp_directory)
         self.server = TftpServer(self.tftp_directory)
 
     def start(self):
